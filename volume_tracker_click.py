@@ -12,7 +12,10 @@ pyautogui.FAILSAFE = False
 x1 = y1 = x2 = y2 = x3 = y3 = 0
 
 # Set up the webcam
-webcam = cv2.VideoCapture(0)
+webcam = cv2.VideoCapture(1)
+if not webcam.isOpened():
+    print("Error: Webcam not accessible.")
+    exit()
 
 # Initialize MediaPipe hands
 mp_hands = mp.solutions.hands
@@ -22,33 +25,25 @@ mp_drawing = mp.solutions.drawing_utils
 # Get screen size for mouse control
 screen_width, screen_height = pyautogui.size()
 
-# Define the control area scaling factor (reduce the control area)
+# Define constants
 control_area_scaling = 1.3
-
-# Define the mouse speed factor (increase the speed)
 mouse_speed_factor = 1.4
+zoom_threshold = 50
+zoom_scale_factor = 0.05  # Adjust this for zoom sensitivity
 
-# Create a named window for resizing
-cv2.namedWindow("Hand Gesture Control", cv2.WINDOW_NORMAL)
+def calculate_distance(x1, y1, x2, y2):
+    return sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
 while True:
     ret, image = webcam.read()
     if not ret:
         break
 
-    # Flip the image horizontally for a later selfie-view display
     image = cv2.flip(image, 1)
-
-    # Convert the BGR image to RGB
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-    # Process the image and find hands
     result = hands.process(rgb_image)
-
-    # Get the frame dimensions
     frame_height, frame_width, _ = image.shape
 
-    # Draw hand landmarks and calculate distances
     if result.multi_hand_landmarks:
         for idx, hand_landmarks in enumerate(result.multi_hand_landmarks):
             mp_drawing.draw_landmarks(image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
@@ -70,25 +65,19 @@ while True:
                     x3 = x
                     y3 = y
 
-            # Calculate the distance between index finger tip and thumb tip
-            dist_thumb_index = sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) // 4
-
-            # Calculate the distance between thumb tip and middle finger tip
-            dist_thumb_middle = sqrt((x2 - x3) ** 2 + (y2 - y3) ** 2)
+            dist_thumb_index = calculate_distance(x2, y2, x1, y1)  # Distance between thumb and index finger
+            dist_thumb_middle = calculate_distance(x2, y2, x3, y3)  # Distance between thumb and middle finger
 
             if handedness == "Right":
-                # Right hand controls mouse movement
                 if dist_thumb_middle > 70:
-                    # Reduce the control area by scaling the hand coordinates
+                    # Control mouse movement
                     screen_x = screen_width * (hand_landmarks.landmark[8].x - 0.5) * control_area_scaling + screen_width / 2
                     screen_y = screen_height * (hand_landmarks.landmark[8].y - 0.5) * control_area_scaling + screen_height / 2
-
-                    # Increase the mouse movement speed
                     current_mouse_x, current_mouse_y = pyautogui.position()
                     pyautogui.moveTo(current_mouse_x + (screen_x - current_mouse_x) * mouse_speed_factor, 
                                      current_mouse_y + (screen_y - current_mouse_y) * mouse_speed_factor)
                 else:
-                    # Adjust the system volume based on the distance between thumb and index finger
+                    # Adjust volume based on thumb and index finger distance
                     if dist_thumb_index > 15:
                         pyautogui.press("volumeup")
                     else:
@@ -96,18 +85,22 @@ while True:
                     cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 5)
 
             elif handedness == "Left":
-                # Left hand for click action
                 if dist_thumb_middle < 70:
-                    pyautogui.click()
+                    # Zoom in/out based on thumb and index finger distance
+                    zoom_level = (dist_thumb_index - zoom_threshold) * zoom_scale_factor
+                    zoom_level = max(1, min(zoom_level, 2))  # Clamp zoom level between 1 and 2
+                    zoomed_image = cv2.resize(image, None, fx=zoom_level, fy=zoom_level, interpolation=cv2.INTER_LINEAR)
+                    
+                    # Display zoomed image
+                    cv2.imshow("Zoomed Image", zoomed_image)
+                    
+                    # Draw line to indicate click action
                     cv2.line(image, (x1, y1), (x3, y3), (0, 0, 255), 5)
 
-    # Display the image in the resizable window
-    cv2.imshow("Hand Gesture Control", image)
+    cv2.imshow("Hand Volume Control and Mouse Tracker", image)
 
-    # Exit on pressing 'ESC'
     if cv2.waitKey(10) & 0xFF == 27:
         break
 
-# Release the webcam and destroy all windows
 webcam.release()
 cv2.destroyAllWindows()
